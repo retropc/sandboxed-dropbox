@@ -1,0 +1,156 @@
+#!/usr/bin/env python
+
+import gtk
+import socket
+import gobject
+import time
+import threading
+import traceback
+import os
+import errno
+import sys
+
+PATH = os.path.split(os.path.realpath(__file__))[0]
+
+gobject.threads_init()
+
+def close_quietly(s):
+  try:
+    s.close()
+  except Exception:
+    pass
+
+class DropboxSocketPoller(object):
+  def __init__(self, path):
+    self.path = path
+    self.s = None
+
+  def poll(self):
+    if self.s is None:
+      s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      try:
+        s.connect(self.path)
+      except IOError, e:
+        return False, e.errno
+      except:
+        close_quietly(s)
+        raise
+      self.s = s
+    else:
+      s = self.s
+
+    try:
+      s.send("get_dropbox_status\ndone\n")
+
+      done, status, buf = False, None, ""
+      while not done:
+        data = self.s.recv(65535)
+        if not data:
+          raise IOError(errno.ENOMSG, "unexpected eof")
+        tokens = (buf + data).split("\n")
+        buf = tokens.pop(-1)
+        if len(buf) > 65535:
+          raise IOError(EMSGSIZE, "too long")
+
+        for t in tokens:
+          if t == "done":
+            done = True
+            break
+
+          t2 = t.split("\t", 1)
+          if t2[0] == "status":
+            status = t2[1]
+
+      return True, status
+    except IOError, e:
+      self.s = None
+      close_quietly(s)
+      traceback.print_exc()
+      return False, e.errno
+    except:
+      self.s = None
+      close_quietly(s)
+      raise
+
+class PollingThread(threading.Thread):
+  def __init__(self, poller, callback):
+    super(PollingThread, self).__init__()
+    self.poller, self.callback = poller, callback
+    self.setDaemon(True)
+
+  def run(self):
+    poller, callback = self.poller, self.callback
+    while True:
+      v = poller()
+      if v[0]:
+        frequency = 1
+      else:
+        frequency = 5
+      gobject.idle_add(callback, v)
+      time.sleep(frequency)
+
+class GTKIcon(object):
+  def __init__(self):
+    self._icon = gtk.StatusIcon()
+    self._icon.connect("popup-menu", self._on_click)
+
+  def set_icon(self, icon):
+    self._icon.set_from_file(os.path.join(PATH, "icon-%s.png" % icon))
+
+  def update_text(self, text):
+    self._icon.set_tooltip_text(text)
+
+  def set_blinking(self, value):
+    self._icon.set_blinking(value)
+
+  def _close_app(self, *args):
+    gtk.main_quit()
+
+  def loop(self):
+    gtk.main()
+
+  def _on_click(self, data, event_button, event_time):
+    menu = gtk.Menu()
+    close_item = gtk.MenuItem("Exit")
+    menu.append(close_item)
+    close_item.connect_object("activate", self._close_app, None)
+    close_item.show()
+
+    menu.popup(None, None, None, event_button, event_time)
+
+def main():
+  ds = DropboxSocketPoller(os.path.expanduser("~/.dropbox/command_socket"))
+  i = GTKIcon()
+
+  last = [None]
+  def callback(cbv):
+    if cbv == last[0]:
+      return
+    last[0] = cbv
+
+    success, message = cbv
+    blinking = False
+    if not success:
+      if message in (errno.ECONNREFUSED, errno.ENOENT):
+        icon, message = "not_running", "not running"
+      else:
+        icon, message = "error", "error: %s" % os.strerror(message)
+    else:
+      if message == "Up to date":
+        icon = "up_to_date"
+      elif message == "Connecting..." or message == "Indexing...":
+        icon = "not_running"
+      else:
+        icon = "working"
+        blinking = True
+
+    i.update_text(message)
+    i.set_icon(icon)
+    i.set_blinking(blinking)
+
+  p = PollingThread(ds.poll, callback)
+  p.start()
+  i.loop()
+
+if __name__ == '__main__':
+  main()
