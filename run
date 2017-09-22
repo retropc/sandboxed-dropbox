@@ -1,0 +1,9 @@
+#!/bin/bash
+set -m
+while true; do
+  ~/.dropbox-dist/dropboxd
+  sleep 3
+  killall dropbox
+  killall dropboxd
+  sleep 2
+done
