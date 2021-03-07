@@ -7,7 +7,7 @@ Runs sandbox in a systemd-nspawn container, restricted to ~/Dropbox and ~/.dropb
 - install systemd-container (on debian)
 - edit dropbox.service.example, search and replace USERNAME with your username
 - copy dropbox.service.example to /etc/systemd/system/dropbox.service
-- mkdir -p /var/lib/machine/dropbox/{etc,bin,usr,usr/bin}
+- mkdir -p /var/lib/machines/dropbox/{etc,bin,usr,usr/bin}
 - copy passwd and group and delete everything but you and root
 - download dropbox headless, untar as normal
 - mkdir -p ~/.dropbox_sandbox/{home,root}
